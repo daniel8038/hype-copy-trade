@@ -4,14 +4,16 @@ use ethers::{signers::LocalWallet, types::H160};
 use hype_copy_trade::{constants::USER_ADDRESS, handler::handle_user_event::handle_user_event};
 use hyperliquid_rust_sdk::{BaseUrl, ExchangeClient, InfoClient, Message, Subscription};
 
+use dotenv::dotenv;
 use log::debug;
 use tokio::sync::mpsc::unbounded_channel;
-
 #[tokio::main]
 async fn main() {
+    dotenv().ok();
     env_logger::init();
-    let mut info_client = InfoClient::new(None, Some(BaseUrl::Mainnet)).await.unwrap();
-    let query_client: InfoClient = InfoClient::new(None, Some(BaseUrl::Mainnet)).await.unwrap();
+
+    let mut info_client = InfoClient::new(None, Some(BaseUrl::Testnet)).await.unwrap();
+    let query_client: InfoClient = InfoClient::new(None, Some(BaseUrl::Testnet)).await.unwrap();
     let query_client: Arc<InfoClient> = Arc::new(query_client);
     let user = H160::from_str(USER_ADDRESS).unwrap();
 
