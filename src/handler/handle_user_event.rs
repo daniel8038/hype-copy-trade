@@ -1,17 +1,19 @@
-use std::{sync::Arc, time::Duration};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use anyhow::Result;
+use ethers::types::H160;
 use hyperliquid_rust_sdk::{
     ClientCancelRequest, ClientLimit, ClientOrder, ClientOrderRequest, ExchangeClient,
-    ExchangeDataStatus, ExchangeResponseStatus, MarketOrderParams, TradeInfo,
+    ExchangeDataStatus, ExchangeResponseStatus, InfoClient, MarketOrderParams, TradeInfo,
 };
 use tokio::time::sleep;
 
-use crate::constants::TRADE_AMOUNT_USDT;
+use crate::constants::{MT_ADDRESS, TRADE_AMOUNT_USDT};
 
 pub async fn handle_user_event(
     trade_infos: Vec<TradeInfo>,
     exchange_client: Arc<ExchangeClient>,
+    query_client: Arc<InfoClient>,
 ) -> Result<()> {
     for (_index, trade) in trade_infos.iter().enumerate() {
         let trade_type = trade.dir.as_str();
@@ -33,7 +35,12 @@ pub async fn handle_user_event(
                     "聪明钱进行现货卖出订单: 代币：{} 价格：{} 数量: {}",
                     trade.coin, trade.px, trade.sz
                 );
-                execute_spot_market_sell_order(&trade, exchange_client.clone()).await?;
+                execute_spot_market_sell_order(
+                    &trade,
+                    exchange_client.clone(),
+                    query_client.clone(),
+                )
+                .await?;
                 // execute_spot_limit_sell_order(&trade, exchange_client.clone()).await?;
             }
             // ......
@@ -93,13 +100,22 @@ async fn execute_spot_market_buy_order(
 async fn execute_spot_market_sell_order(
     trade: &TradeInfo,
     exchange_client: Arc<ExchangeClient>,
+    query_client: Arc<InfoClient>,
 ) -> Result<()> {
     println!("执行现货买入 {} 跟单", trade.coin);
+    let my_all_token_balances = query_client
+        .user_token_balances(H160::from_str(MT_ADDRESS).unwrap())
+        .await?;
+    let current_token_balance = my_all_token_balances
+        .balances
+        .iter()
+        .find(|balance| balance.coin == trade.coin)
+        .ok_or_else(|| anyhow::anyhow!("未找到代币 {} 的余额", trade.coin))?;
     // Market open order
     let market_open_params = MarketOrderParams {
         asset: &trade.coin,
         is_buy: false,
-        sz: TRADE_AMOUNT_USDT / trade.px.parse::<f64>().unwrap(),
+        sz: current_token_balance.total.parse::<f64>().unwrap(),
         px: None,
         slippage: Some(0.05), // 1% slippage
         cloid: None,

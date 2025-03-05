@@ -14,6 +14,8 @@ use tokio::sync::mpsc::unbounded_channel;
 async fn main() {
     env_logger::init();
     let mut info_client = InfoClient::new(None, Some(BaseUrl::Mainnet)).await.unwrap();
+    let query_client: InfoClient = InfoClient::new(None, Some(BaseUrl::Mainnet)).await.unwrap();
+    let query_client: Arc<InfoClient> = Arc::new(query_client);
     let user = H160::from_str(USER_ADDRESS).unwrap();
 
     let (sender, mut receiver) = unbounded_channel();
@@ -59,8 +61,14 @@ async fn main() {
                 hyperliquid_rust_sdk::UserData::Fills(trade_infos) => {
                     let exchange_client_clone = exchange_client.clone();
                     let trade_infos_clone = trade_infos.clone();
+                    let query_client_clone = query_client.clone();
                     tokio::spawn(async {
-                        let _ = handle_user_event(trade_infos_clone, exchange_client_clone).await;
+                        let _ = handle_user_event(
+                            trade_infos_clone,
+                            exchange_client_clone,
+                            query_client_clone,
+                        )
+                        .await;
                     });
                 }
                 _ => {}
