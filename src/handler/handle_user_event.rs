@@ -4,7 +4,7 @@ use hyperliquid_rust_sdk::{
     ClientLimit, ClientOrder, ClientOrderRequest, ExchangeClient, ExchangeDataStatus,
     ExchangeResponseStatus, InfoClient, SpotMeta, TradeInfo,
 };
-use std::{fs, path::Path, str::FromStr, sync::Arc};
+use std::{env, fs, path::Path, str::FromStr, sync::Arc};
 
 use crate::constants::{MT_ADDRESS, TRADE_AMOUNT_USDT};
 
@@ -13,6 +13,7 @@ pub async fn handle_user_event(
     exchange_client: Arc<ExchangeClient>,
     query_client: Arc<InfoClient>,
 ) -> Result<()> {
+    let enable_sell = env::var("ENABLE_SELL").unwrap().parse::<bool>().unwrap();
     for (_index, trade) in trade_infos.iter().enumerate() {
         let trade_type = trade.dir.as_str();
         println!("trade_type {}", trade_type);
@@ -33,8 +34,10 @@ pub async fn handle_user_event(
                     "聪明钱进行现货卖出订单: 代币：{} 价格：{} 数量: {}",
                     trade.coin, trade.px, trade.sz
                 );
-                execute_spot_sell_order(&trade, exchange_client.clone(), query_client.clone())
-                    .await?;
+                if enable_sell {
+                    execute_spot_sell_order(&trade, exchange_client.clone(), query_client.clone())
+                        .await?;
+                }
             }
             // ......
             "Close Long" => {

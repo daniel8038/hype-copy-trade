@@ -14,10 +14,11 @@ async fn main() {
     dotenv().ok();
     env_logger::init();
     let is_test = env::var("TEST").unwrap().parse::<bool>().unwrap();
-    let network = if is_test {
-        BaseUrl::Testnet
-    } else {
-        BaseUrl::Mainnet
+    let enable_sell = env::var("ENABLE_SELL").unwrap().parse::<bool>().unwrap();
+    println!("是否为测试环境: {} 是否跟卖: {} ", is_test, enable_sell);
+    let network = match is_test {
+        true => BaseUrl::Testnet,
+        false => BaseUrl::Mainnet,
     };
     let mut info_client = InfoClient::new(None, Some(network)).await.unwrap();
     let query_client: InfoClient = InfoClient::new(None, Some(network)).await.unwrap();
@@ -40,18 +41,13 @@ async fn main() {
     // 更新Info数据
     let query_info_client = query_client.clone();
     tokio::spawn(async move {
-        if let Err(e) = info_init(query_info_client.clone()).await {
-            eprintln!("首次更新spot_meta失败: {}", e);
-        }
-        // 30分钟请求一次 更新Info数据
-        let mut interval = time::interval(Duration::from_secs(30 * 60));
         loop {
-            interval.tick().await;
             if let Err(e) = info_init(query_info_client.clone()).await {
                 eprintln!("更新spot_meta失败: {}", e);
             } else {
                 println!("成功完成定时更新spot_meta");
             }
+            tokio::time::sleep(Duration::from_secs(30 * 60)).await;
         }
     });
 
