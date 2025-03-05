@@ -2,9 +2,9 @@ use anyhow::{bail, Result};
 use ethers::types::H160;
 use hyperliquid_rust_sdk::{
     ClientLimit, ClientOrder, ClientOrderRequest, ExchangeClient, ExchangeDataStatus,
-    ExchangeResponseStatus, InfoClient, MarketOrderParams, TradeInfo,
+    ExchangeResponseStatus, InfoClient, SpotMeta, TradeInfo,
 };
-use std::{str::FromStr, sync::Arc};
+use std::{fs, path::Path, str::FromStr, sync::Arc};
 
 use crate::constants::{MT_ADDRESS, TRADE_AMOUNT_USDT};
 
@@ -33,12 +33,8 @@ pub async fn handle_user_event(
                     "聪明钱进行现货卖出订单: 代币：{} 价格：{} 数量: {}",
                     trade.coin, trade.px, trade.sz
                 );
-                // execute_spot_market_sell_order(
-                //     &trade,
-                //     exchange_client.clone(),
-                //     query_client.clone(),
-                // )
-                // .await?;
+                execute_spot_sell_order(&trade, exchange_client.clone(), query_client.clone())
+                    .await?;
             }
             // ......
             "Close Long" => {
@@ -68,7 +64,7 @@ async fn execute_spot_buy_order(
     // 解析原始价格
     let original_price = trade.px.parse::<f64>().unwrap();
     // 计算加价10%后的价格
-    let limit_price = original_price * 1.01;
+    let limit_price = original_price * 1.05;
     // 获取原始价格的小数位数
     let decimal_places = if trade.px.contains('.') {
         trade.px.split('.').last().unwrap().len() as u32
@@ -84,7 +80,7 @@ async fn execute_spot_buy_order(
         is_buy: true,
         reduce_only: false,
         limit_px: adjusted_price,
-        sz: (TRADE_AMOUNT_USDT / trade.px.parse::<f64>().unwrap()).round(),
+        sz: (TRADE_AMOUNT_USDT / trade.px.parse::<f64>().unwrap()),
         cloid: None,
         // 立即成交
         // Alo 挂单  Ioc 立即成交  否则失败 Gtc 订单保持有效直到被取消或完全成交
@@ -114,97 +110,101 @@ async fn execute_spot_buy_order(
     Ok(())
 }
 
-async fn execute_spot_limit_buy_order(
+// 立即成交
+async fn execute_spot_sell_order(
     trade: &TradeInfo,
     exchange_client: Arc<ExchangeClient>,
+    query_client: Arc<InfoClient>,
 ) -> Result<()> {
-    println!("执行现货买入 {} 跟单", trade.coin);
-    let market_open_params = MarketOrderParams {
-        asset: "PURR",
-        is_buy: true,
-        sz: TRADE_AMOUNT_USDT / trade.px.parse::<f64>().unwrap(),
-        px: None,
-        slippage: Some(0.05),
-        cloid: None,
-        wallet: None,
+    println!("执行现货卖出 {} 跟单", trade.coin);
+    let spot_meta_path = Path::new("info").join("spot-meta.json");
+    let spot_meta_json = match fs::read_to_string(spot_meta_path) {
+        Ok(content) => content,
+        Err(e) => {
+            println!("无法读取spot-meta.json: {}", e);
+            bail!("无法读取资产信息文件");
+        }
     };
-    println!("{:#?}", market_open_params);
-    let response = match exchange_client.market_open(market_open_params).await {
+    let spot_meta = match serde_json::from_str::<SpotMeta>(&spot_meta_json) {
+        Ok(meta) => meta,
+        Err(e) => {
+            println!("解析spot-meta.json失败: {}", e);
+            bail!("资产信息文件格式错误");
+        }
+    };
+    let spot_universe_info = spot_meta
+        .universe
+        .iter()
+        .find(|asset| asset.name == trade.coin)
+        .ok_or_else(|| anyhow::anyhow!("未找到交易对 {}", trade.coin))?;
+
+    let current_spot_token_info = spot_meta.tokens[&spot_universe_info.index + 1].clone();
+
+    let my_all_token_balances = query_client
+        .user_token_balances(H160::from_str(MT_ADDRESS).unwrap())
+        .await?;
+    let current_spot = my_all_token_balances
+        .balances
+        .iter()
+        .find(|token| token.coin == current_spot_token_info.name)
+        .unwrap();
+    let current_spot_balance = &current_spot.total;
+
+    println!(
+        "当前代币 {:#?} 余额：{}",
+        current_spot_token_info, current_spot_balance
+    );
+    // 解析原始价格
+    let original_price = trade.px.parse::<f64>().unwrap();
+    // 计算加价10%后的价格
+    let limit_price = original_price * 0.95;
+    // 获取原始价格的小数位数
+    let decimal_places = if trade.px.contains('.') {
+        trade.px.split('.').last().unwrap().len() as u32
+    } else {
+        0
+    };
+    // 调整价格精度，保持与原始价格相同的小数位数
+    let adjusted_price = (limit_price * 10f64.powi(decimal_places as i32)).round()
+        / 10f64.powi(decimal_places as i32);
+    // 根据基础代币的szDecimals调整数量
+    let adjusted_size = if current_spot_token_info.sz_decimals == 0 {
+        current_spot_balance.parse::<f64>()?.floor()
+    } else {
+        let factor = 10f64.powi(current_spot_token_info.sz_decimals as i32);
+        (current_spot_balance.parse::<f64>()? * factor).floor() / factor
+    };
+    println!("交易价格 {}  交易sz {}", adjusted_price, adjusted_size);
+    let order = ClientOrderRequest {
+        asset: trade.coin.to_string(),
+        is_buy: false,
+        reduce_only: false,
+        limit_px: adjusted_price,
+        sz: adjusted_size,
+        cloid: None,
+        // Alo 挂单  Ioc 立即成交  否则失败 Gtc 订单保持有效直到被取消或完全成交
+        order_type: ClientOrder::Limit(ClientLimit {
+            tif: "Ioc".to_string(),
+        }),
+    };
+    let response = match exchange_client.order(order, None).await {
         Ok(resp) => resp,
         Err(e) => {
             println!("交易失败: 错误详情 - {}", e);
             bail!(e)
         }
     };
-
+    println!("response:  {:#?}", response);
     let response = match response {
         ExchangeResponseStatus::Ok(exchange_response) => exchange_response,
-        ExchangeResponseStatus::Err(e) => panic!("交易回执发生错误: {e}"),
+        ExchangeResponseStatus::Err(e) => panic!("error with exchange response: {e}"),
     };
-    println!("这是返回的response: {:#?}", response);
     let status = response.data.unwrap().statuses[0].clone();
     let oid = match status {
         ExchangeDataStatus::Filled(order) => order.oid,
         ExchangeDataStatus::Resting(order) => order.oid,
         _ => panic!("oid status错误: {status:?}"),
     };
-    println!("--市价单--跟单购买成功： 订单id {}", oid);
-    Ok(())
-}
-// 立即成交
-
-async fn execute_spot_market_sell_order(
-    trade: &TradeInfo,
-    exchange_client: Arc<ExchangeClient>,
-    query_client: Arc<InfoClient>,
-) -> Result<()> {
-    println!("执行现货买入 {} 跟单", trade.coin);
-    let my_all_token_balances = query_client
-        .user_token_balances(H160::from_str(MT_ADDRESS).unwrap())
-        .await?;
-    println!("my_all_token_balances {:#?} ", my_all_token_balances);
-    let current_token_balance = my_all_token_balances
-        .balances
-        .iter()
-        .find(|balance| balance.coin == trade.coin)
-        .ok_or_else(|| anyhow::anyhow!("未找到代币 {} 的余额", trade.coin))?;
-    println!("current_token_balance {:#?} ", current_token_balance);
-    // Market open order
-    // let market_open_params = MarketOrderParams {
-    //     asset: &trade.coin,
-    //     is_buy: false,
-    //     sz: current_token_balance.total.parse::<f64>().unwrap(),
-    //     px: None,
-    //     slippage: Some(0.05), // 1% slippage
-    //     cloid: None,
-    //     wallet: None,
-    // };
-    // let response = exchange_client
-    //     .market_open(market_open_params)
-    //     .await
-    //     .unwrap();
-
-    // let response = match response {
-    //     ExchangeResponseStatus::Ok(exchange_response) => exchange_response,
-    //     ExchangeResponseStatus::Err(e) => panic!("error with exchange response: {e}"),
-    // };
-    // let status = response.data.unwrap().statuses[0].clone();
-    // let oid = match status {
-    //     ExchangeDataStatus::Filled(order) => order.oid,
-    //     ExchangeDataStatus::Resting(order) => order.oid,
-    //     _ => panic!("Error: {status:?}"),
-    // };
-    // println!("--市价单--跟卖出成功： 订单id {}", oid);
-    Ok(())
-}
-#[warn(dead_code)]
-#[warn(dead_code)]
-async fn execute_spot_limit_sell_order(
-    trade: &TradeInfo,
-    exchange_client: Arc<ExchangeClient>,
-) -> Result<()> {
-    println!("执行现货卖出 {} 跟单", trade.coin);
-
-    todo!();
+    println!("跟单卖出清仓： 订单id {}", oid);
     Ok(())
 }

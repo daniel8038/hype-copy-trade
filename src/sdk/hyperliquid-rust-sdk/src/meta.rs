@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
 use ethers::abi::ethereum_types::H128;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Meta {
     pub universe: Vec<AssetMeta>,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Serialize, Clone)]
 pub struct SpotMeta {
     pub universe: Vec<SpotAssetMeta>,
     pub tokens: Vec<TokenInfo>,
@@ -70,7 +70,7 @@ pub struct AssetMeta {
     pub sz_decimals: u32,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpotAssetMeta {
     pub tokens: [usize; 2],
@@ -79,7 +79,7 @@ pub struct SpotAssetMeta {
     pub is_canonical: bool,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenInfo {
     pub name: String,

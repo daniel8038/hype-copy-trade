@@ -1,21 +1,28 @@
-use std::{env, str::FromStr, sync::Arc};
+use std::{env, str::FromStr, sync::Arc, time::Duration};
 
 use ethers::{signers::LocalWallet, types::H160};
-use hype_copy_trade::{constants::USER_ADDRESS, handler::handle_user_event::handle_user_event};
+use hype_copy_trade::{
+    constants::SMART_ADDRESS, handler::handle_user_event::handle_user_event, utils::info_init,
+};
 use hyperliquid_rust_sdk::{BaseUrl, ExchangeClient, InfoClient, Message, Subscription};
 
 use dotenv::dotenv;
 use log::debug;
-use tokio::sync::mpsc::unbounded_channel;
+use tokio::{sync::mpsc::unbounded_channel, time};
 #[tokio::main]
 async fn main() {
     dotenv().ok();
     env_logger::init();
-
-    let mut info_client = InfoClient::new(None, Some(BaseUrl::Testnet)).await.unwrap();
-    let query_client: InfoClient = InfoClient::new(None, Some(BaseUrl::Testnet)).await.unwrap();
+    let is_test = env::var("TEST").unwrap().parse::<bool>().unwrap();
+    let network = if is_test {
+        BaseUrl::Testnet
+    } else {
+        BaseUrl::Mainnet
+    };
+    let mut info_client = InfoClient::new(None, Some(network)).await.unwrap();
+    let query_client: InfoClient = InfoClient::new(None, Some(network)).await.unwrap();
     let query_client: Arc<InfoClient> = Arc::new(query_client);
-    let user = H160::from_str(USER_ADDRESS).unwrap();
+    let user = H160::from_str(SMART_ADDRESS).unwrap();
 
     let (sender, mut receiver) = unbounded_channel();
 
@@ -25,10 +32,29 @@ async fn main() {
         .unwrap();
     let wallet: LocalWallet = env::var("PRIVATE_KEY").unwrap().parse().unwrap();
 
-    let exchange_client = ExchangeClient::new(None, wallet, Some(BaseUrl::Testnet), None, None)
+    let exchange_client = ExchangeClient::new(None, wallet, Some(network), None, None)
         .await
         .unwrap();
     let exchange_client = Arc::new(exchange_client);
+
+    // 更新Info数据
+    let query_info_client = query_client.clone();
+    tokio::spawn(async move {
+        if let Err(e) = info_init(query_info_client.clone()).await {
+            eprintln!("首次更新spot_meta失败: {}", e);
+        }
+        // 30分钟请求一次 更新Info数据
+        let mut interval = time::interval(Duration::from_secs(30 * 60));
+        loop {
+            interval.tick().await;
+            if let Err(e) = info_init(query_info_client.clone()).await {
+                eprintln!("更新spot_meta失败: {}", e);
+            } else {
+                println!("成功完成定时更新spot_meta");
+            }
+        }
+    });
+
     // this loop ends when we unsubscribe
     while let Some(message) = receiver.recv().await {
         match message {
