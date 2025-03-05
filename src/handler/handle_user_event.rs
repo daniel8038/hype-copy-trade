@@ -6,7 +6,7 @@ use hyperliquid_rust_sdk::{
 };
 use std::{env, fs, path::Path, str::FromStr, sync::Arc};
 
-use crate::constants::{MT_ADDRESS, TRADE_AMOUNT_USDT};
+use crate::constants::{MY_ADDRESS, TRADE_AMOUNT_USDT};
 
 pub async fn handle_user_event(
     trade_infos: Vec<TradeInfo>,
@@ -144,7 +144,7 @@ async fn execute_spot_sell_order(
     let current_spot_token_info = spot_meta.tokens[&spot_universe_info.index + 1].clone();
 
     let my_all_token_balances = query_client
-        .user_token_balances(H160::from_str(MT_ADDRESS).unwrap())
+        .user_token_balances(H160::from_str(MY_ADDRESS).unwrap())
         .await?;
     let current_spot = my_all_token_balances
         .balances
