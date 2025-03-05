@@ -1,12 +1,10 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
-
 use anyhow::Result;
 use ethers::types::H160;
 use hyperliquid_rust_sdk::{
-    ClientCancelRequest, ClientLimit, ClientOrder, ClientOrderRequest, ExchangeClient,
-    ExchangeDataStatus, ExchangeResponseStatus, InfoClient, MarketOrderParams, TradeInfo,
+    ClientLimit, ClientOrder, ClientOrderRequest, ExchangeClient, ExchangeDataStatus,
+    ExchangeResponseStatus, InfoClient, MarketOrderParams, TradeInfo,
 };
-use tokio::time::sleep;
+use std::{str::FromStr, sync::Arc};
 
 use crate::constants::{MT_ADDRESS, TRADE_AMOUNT_USDT};
 
@@ -24,10 +22,9 @@ pub async fn handle_user_event(
                     "聪明钱进行现货买入订单: 代币：{} 价格：{} 数量: {}",
                     trade.coin, trade.px, trade.sz
                 );
-                // 市价单
                 execute_spot_market_buy_order(&trade, exchange_client.clone()).await?;
-                // 限价单
-                // execute_spot_limit_buy_order(&trade, exchange_client.clone()).await?;
+                // 限价单 可以挂上止盈止损单
+                // execute_spot_limit_sell_order(&trade, exchange_client.clone()).await?;
             }
             "Sell" => {
                 println!("===============聪明现货卖出信息==================");
@@ -41,7 +38,6 @@ pub async fn handle_user_event(
                     query_client.clone(),
                 )
                 .await?;
-                // execute_spot_limit_sell_order(&trade, exchange_client.clone()).await?;
             }
             // ......
             "Close Long" => {
@@ -68,13 +64,12 @@ async fn execute_spot_market_buy_order(
     exchange_client: Arc<ExchangeClient>,
 ) -> Result<()> {
     println!("执行现货买入 {} 跟单", trade.coin);
-    // Market open order
     let market_open_params = MarketOrderParams {
         asset: &trade.coin,
         is_buy: true,
         sz: TRADE_AMOUNT_USDT / trade.px.parse::<f64>().unwrap(),
         px: None,
-        slippage: Some(0.05), // 1% slippage
+        slippage: Some(0.05),
         cloid: None,
         wallet: None,
     };
@@ -140,6 +135,7 @@ async fn execute_spot_market_sell_order(
     println!("--市价单--跟卖出成功： 订单id {}", oid);
     Ok(())
 }
+#[warn(dead_code)]
 async fn execute_spot_limit_buy_order(
     trade: &TradeInfo,
     exchange_client: Arc<ExchangeClient>,
@@ -175,6 +171,7 @@ async fn execute_spot_limit_buy_order(
     Ok(())
 }
 
+#[warn(dead_code)]
 async fn execute_spot_limit_sell_order(
     trade: &TradeInfo,
     exchange_client: Arc<ExchangeClient>,
