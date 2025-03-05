@@ -63,7 +63,7 @@ async fn execute_spot_buy_order(
         reduce_only: false,
         limit_px: trade.px.parse::<f64>().unwrap() * 1.1,
         // 100 U
-        sz: trade.px.parse::<f64>().unwrap() / TRADE_AMOUNT_USDT,
+        sz: TRADE_AMOUNT_USDT / trade.px.parse::<f64>().unwrap(),
         cloid: None,
         order_type: ClientOrder::Limit(ClientLimit {
             tif: "Gtc".to_string(),
