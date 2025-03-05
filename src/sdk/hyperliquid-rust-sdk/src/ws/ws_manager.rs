@@ -5,7 +5,7 @@ use crate::{
     WebData2,
 };
 use futures_util::{stream::SplitSink, SinkExt, StreamExt};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::BorrowMut,
@@ -189,7 +189,7 @@ impl WsManager {
                     match serde_json::to_string(&Ping { method: "ping" }) {
                         Ok(payload) => {
                             let mut writer = writer.lock().await;
-                            println!("发送心跳ping");
+                            debug!("ping");
                             if let Err(err) = writer.send(protocol::Message::Text(payload)).await {
                                 error!("Error pinging server: {err}")
                             }

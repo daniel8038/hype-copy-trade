@@ -1,12 +1,13 @@
-use std::{fs, path::Path, str::FromStr};
+use std::{env, fs, path::Path, str::FromStr, sync::Arc};
 
-use ethers::types::H160;
+use ethers::{signers::LocalWallet, types::H160};
 use hype_copy_trade::{
     constants::USER_ADDRESS,
     handler::{handle_trades_event::handle_trades_event, handle_user_event::handle_user_event},
 };
-use hyperliquid_rust_sdk::{BaseUrl, InfoClient, Message, Subscription};
+use hyperliquid_rust_sdk::{BaseUrl, ExchangeClient, InfoClient, Message, Subscription};
 
+use log::debug;
 use tokio::sync::mpsc::unbounded_channel;
 
 #[tokio::main]
@@ -21,44 +22,12 @@ async fn main() {
         .subscribe(Subscription::UserEvents { user }, sender.clone())
         .await
         .unwrap();
-    // 定时获取 现货数据
-    // tokio::spawn(async move {
-    //     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
+    let wallet: LocalWallet = env::var("PRIVATE_KEY").unwrap().parse().unwrap();
 
-    //     loop {
-    //         interval.tick().await;
-
-    //         println!("定时获取现货数据...");
-    //         match info_client.spot_meta().await {
-    //             Ok(spot_meta) => {
-    //                 // 确保目录存在
-    //                 if let Err(e) = fs::create_dir_all("info") {
-    //                     println!("创建目录失败: {}", e);
-    //                     continue;
-    //                 }
-
-    //                 // 写入文件
-    //                 if let Err(e) = fs::write(Path::new("info/spot_meta.json"), &spot_meta) {
-    //                     println!("写入文件失败: {}", e);
-    //                 } else {
-    //                     println!("现货数据已保存到 info/spot_meta.json");
-    //                 }
-    //             }
-    //             Err(e) => {
-    //                 println!("获取现货数据失败: {}", e);
-    //             }
-    //         }
-    //     }
-    // });
-    // let _ = info_client
-    //     .subscribe(
-    //         Subscription::Trades {
-    //             coin: ("@107".into()),
-    //         },
-    //         sender.clone(),
-    //     )
-    //     .await
-    //     .unwrap();
+    let exchange_client = ExchangeClient::new(None, wallet, Some(BaseUrl::Testnet), None, None)
+        .await
+        .unwrap();
+    let exchange_client = Arc::new(exchange_client);
     // this loop ends when we unsubscribe
     while let Some(message) = receiver.recv().await {
         match message {
@@ -88,15 +57,16 @@ async fn main() {
                 // hyperliquid_rust_sdk::UserData::Liquidation(liquidation) => todo!(),
                 // hyperliquid_rust_sdk::UserData::NonUserCancel(non_user_cancels) => todo!(),
                 hyperliquid_rust_sdk::UserData::Fills(trade_infos) => {
+                    let exchange_client_clone = exchange_client.clone();
                     let trade_infos_clone = trade_infos.clone();
-                    tokio::spawn(async move {
-                        let _ = handle_user_event(trade_infos_clone).await;
+                    tokio::spawn(async {
+                        let _ = handle_user_event(trade_infos_clone, exchange_client_clone).await;
                     });
                 }
                 _ => {}
             },
             Message::Pong => {
-                println!("收到pong");
+                debug!("pong");
             }
             _ => {}
         }
